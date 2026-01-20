@@ -1,11 +1,11 @@
-FROM n8nio/n8n:latest
+FROM python:3.11-alpine
 
-USER root
-
-# Install ffmpeg (works on Koyeb)
+# Install ffmpeg + fonts
 RUN apk add --no-cache ffmpeg fontconfig ttf-dejavu
 
-# Video working directory
-RUN mkdir -p /data/videos && chmod -R 777 /data
+WORKDIR /app
+COPY main.py .
 
-USER node
+RUN pip install fastapi uvicorn pydantic
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
