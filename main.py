@@ -5,11 +5,14 @@ import subprocess, uuid, os, threading, time
 
 app = FastAPI()
 
+# Directory to store videos
 VIDEO_DIR = "/tmp/videos"
 os.makedirs(VIDEO_DIR, exist_ok=True)
 
-VIDEO_MAP = {}  # video_id -> {"status": "processing"/"ready"/"error", "path": file_path}
+# Map video_id -> {"status": ..., "path": ...}
+VIDEO_MAP = {}
 
+# Request model
 class VideoRequest(BaseModel):
     caption: str
     duration: int  # 1-15 seconds
@@ -17,29 +20,30 @@ class VideoRequest(BaseModel):
 # Background FFmpeg worker
 def generate_video(video_id: str, caption: str, duration: int):
     output = os.path.join(VIDEO_DIR, f"{video_id}.mp4")
-    safe_caption = caption.replace("'", "\\'")
+    safe_caption = caption.replace("'", "\\'")  # escape single quotes
     cmd = [
         "ffmpeg", "-y",
         "-f", "lavfi",
         "-i", f"color=c=black:s=1080x1920:d={duration}",
         "-vf",
         (
-            f"drawtext=fontfile=/usr/share/fonts/TTF/DejaVuSans.ttf:"
+            f"drawtext=font='DejaVuSans':"
             f"text='{safe_caption}':"
             "fontcolor=white:"
             "fontsize=64:"
-            "line_spacing=10:"
             "x=(w-text_w)/2:"
             "y=(h-text_h)/2"
         ),
+        "-movflags", "+faststart",
         output
     ]
     try:
         subprocess.run(cmd, check=True, timeout=30)
         VIDEO_MAP[video_id]["status"] = "ready"
         VIDEO_MAP[video_id]["path"] = output
-    except Exception:
+    except Exception as e:
         VIDEO_MAP[video_id]["status"] = "error"
+        print(f"[FFMPEG ERROR] {e}")
 
 @app.post("/post")
 def create_video(data: VideoRequest):
@@ -49,7 +53,7 @@ def create_video(data: VideoRequest):
     video_id = str(uuid.uuid4())
     VIDEO_MAP[video_id] = {"status": "processing", "path": None}
 
-    # Start FFmpeg in background
+    # Start FFmpeg in background thread
     threading.Thread(target=generate_video, args=(video_id, data.caption, data.duration), daemon=True).start()
 
     return JSONResponse({"video_id": video_id, "message": "Video is being generated"})
@@ -72,11 +76,11 @@ def get_video(video_id: str):
         else:
             raise HTTPException(status_code=404, detail="Video file not found")
 
-# Optional: cleanup old videos
+# Cleanup old videos every hour
 def cleanup_old_videos():
     while True:
         for vid, info in list(VIDEO_MAP.items()):
-            path = info["path"]
+            path = info.get("path")
             if path and os.path.isfile(path) and (time.time() - os.path.getmtime(path)) > 3600:
                 os.remove(path)
                 VIDEO_MAP.pop(vid)
@@ -84,8 +88,8 @@ def cleanup_old_videos():
 
 threading.Thread(target=cleanup_old_videos, daemon=True).start()
 
-# Start server with dynamic port
+# Run server
 if __name__ == "__main__":
-    import uvicorn, os
-    port = int(os.environ.get("PORT", 8000))
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))  # Render/Koyeb sets PORT automatically
     uvicorn.run(app, host="0.0.0.0", port=port)
