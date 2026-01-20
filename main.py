@@ -16,7 +16,7 @@ class VideoRequest(BaseModel):
 def generate_video(video_id: str, caption: str, duration: int):
     output = os.path.join(VIDEO_DIR, f"{video_id}.mp4")
     safe_caption = caption.replace("'", "\\'")
-    font_path = "/usr/share/fonts/TTF/DejaVuSans.ttf"  # full path
+    font_path = "./DejaVuSans.ttf"  # full path
     cmd = [
         "ffmpeg", "-y",
         "-f", "lavfi",
