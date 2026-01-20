@@ -8,7 +8,7 @@ app = FastAPI()
 VIDEO_DIR = "/tmp/videos"
 os.makedirs(VIDEO_DIR, exist_ok=True)
 
-VIDEO_MAP = {}  # video_id -> {"status": "processing"/"ready", "path": file_path}
+VIDEO_MAP = {}  # video_id -> {"status": "processing"/"ready"/"error", "path": file_path}
 
 class VideoRequest(BaseModel):
     caption: str
@@ -49,7 +49,7 @@ def create_video(data: VideoRequest):
     video_id = str(uuid.uuid4())
     VIDEO_MAP[video_id] = {"status": "processing", "path": None}
 
-    # Start background thread for FFmpeg
+    # Start FFmpeg in background
     threading.Thread(target=generate_video, args=(video_id, data.caption, data.duration), daemon=True).start()
 
     return JSONResponse({"video_id": video_id, "message": "Video is being generated"})
@@ -59,18 +59,20 @@ def get_video(video_id: str):
     if video_id not in VIDEO_MAP:
         raise HTTPException(status_code=404, detail="Video ID not found")
 
-    status = VIDEO_MAP[video_id]["status"]
+    info = VIDEO_MAP[video_id]
 
-    if status == "processing":
+    if info["status"] == "processing":
         return JSONResponse({"status": "processing", "message": "Video is not ready yet"})
-    elif status == "error":
+    elif info["status"] == "error":
         raise HTTPException(status_code=500, detail="Video generation failed")
-    elif status == "ready" and os.path.isfile(VIDEO_MAP[video_id]["path"]):
-        return FileResponse(VIDEO_MAP[video_id]["path"], media_type="video/mp4", filename=f"{video_id}.mp4")
-    else:
-        raise HTTPException(status_code=404, detail="Video file not found")
+    elif info["status"] == "ready":
+        path = info["path"]
+        if path and os.path.isfile(path):
+            return FileResponse(path, media_type="video/mp4", filename=f"{video_id}.mp4")
+        else:
+            raise HTTPException(status_code=404, detail="Video file not found")
 
-# Cleanup old videos every hour
+# Optional: cleanup old videos
 def cleanup_old_videos():
     while True:
         for vid, info in list(VIDEO_MAP.items()):
@@ -82,9 +84,8 @@ def cleanup_old_videos():
 
 threading.Thread(target=cleanup_old_videos, daemon=True).start()
 
-# Use dynamic port for Render / Koyeb
+# Start server with dynamic port
 if __name__ == "__main__":
-    import uvicorn
-    import os
+    import uvicorn, os
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
